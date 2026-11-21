@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from monitor import core, parse  # noqa: E402
+from monitor import core, parse, walmart_api  # noqa: E402
 from monitor.fetch import Fetched  # noqa: E402
 from monitor.notify import NotifyError, Telegram  # noqa: E402
 
@@ -27,6 +27,7 @@ T0 = datetime(2026, 11, 21, 17, 0, tzinfo=timezone.utc)  # 10:00 AM Arizona
 def cfg():
     c = json.loads((ROOT / "config.json").read_text())
     c["retailers"]["samsclub"]["nearby_store_ids"] = {"6000": "Tempe test club"}
+    c["retailers"]["samsclub"]["min_interval_minutes"] = 0  # scenario tests check every cycle
     return c
 
 
@@ -265,6 +266,88 @@ class TestScenarios(unittest.TestCase):
         _, lines = sim.cycle(oos("walmart"), oos("samsclub"), n)
         self.assertTrue(any("since previous run" in l for l in lines))
         self.assertTrue(any("no check ran" in t for t, _ in n.sent))
+
+
+def api_item(**kw):
+    item = {"itemId": 20255253279, "name": "VIZIO 50\" Class Quantum 4K QLED ... VQD50X-10", "salePrice": 128.0,
+            "upc": "194346693900", "modelNumber": "VQD50X-10", "brandName": "VIZIO", "sellerInfo": "Walmart.com",
+            "stock": "Available", "availableOnline": True, "attributes": {"isOrderable": "Y"}, "offerType": "ONLINE_AND_STORE"}
+    item.update(kw)
+    return {"items": [item]}
+
+
+class TestWalmartApi(unittest.TestCase):
+    def ev(self, payload, status=200, err=""):
+        return walmart_api.evaluate(payload, status, err, cfg())
+
+    def test_in_stock_at_target(self):
+        r = self.ev(api_item())
+        self.assertEqual(r.state, parse.IN_STOCK)
+        self.assertEqual([c.method for c in r.qualifying_channels], ["SHIPPING"])
+        self.assertIn("85281", r.qualifying_channels[0].describe("85281"))
+
+    def test_out_of_stock_and_not_orderable(self):
+        self.assertEqual(self.ev(api_item(stock="Not available")).state, parse.OUT_OF_STOCK)
+        self.assertEqual(self.ev(api_item(availableOnline=False)).state, parse.OUT_OF_STOCK)
+        self.assertEqual(self.ev(api_item(attributes={"isOrderable": "N"})).state, parse.OUT_OF_STOCK)
+
+    def test_price_above(self):
+        self.assertEqual(self.ev(api_item(salePrice=149.99)).state, parse.PRICE_ABOVE_TARGET)
+
+    def test_wrong_product_or_seller(self):
+        for kw in [dict(upc="000000000000"), dict(modelNumber="V50-J01"), dict(brandName="TCL"),
+                   dict(sellerInfo="Random Marketplace Co"), dict(upc=None, modelNumber=None)]:
+            r = self.ev(api_item(**kw))
+            self.assertEqual(r.state, parse.UNKNOWN, kw)
+
+    def test_errors(self):
+        self.assertEqual(self.ev(None, 401, "HTTP 401").state, parse.ERROR)
+        self.assertEqual(self.ev(None, 429, "HTTP 429").state, parse.BLOCKED)
+        self.assertEqual(self.ev(None, None, "timeout").state, parse.ERROR)
+        self.assertEqual(self.ev({"items": []}).state, parse.UNKNOWN)
+        self.assertEqual(self.ev(api_item(stock=None)).state, parse.UNKNOWN)
+        self.assertEqual(self.ev(api_item(salePrice=None)).state, parse.UNKNOWN)
+
+    def test_cycle_uses_api_checker_and_dedupes(self):
+        sim, n = Sim(), FakeNotifier()
+        checkers = {"walmart": lambda c: walmart_api.evaluate(api_item(), 200, "", c)}
+        pages = {sim.cfg["retailers"]["samsclub"]["url"]: SAMS_CHALLENGE}
+        fetcher = lambda url: Fetched(url, 200, pages[url], attempts=1)  # noqa: E731
+        for _ in range(3):
+            sim.state, _, code = core.run_cycle(sim.cfg, sim.state, fetcher, n, sim.now, checkers=checkers)
+            sim.now += timedelta(minutes=10)
+        self.assertEqual(len(n.stock_alerts), 1)
+        self.assertIn("Shipping to 85281", n.stock_alerts[0])
+
+    def test_signature_verifies_with_public_key(self):
+        import subprocess, tempfile, base64, os
+        with tempfile.TemporaryDirectory() as d:
+            priv, pub = os.path.join(d, "p.pem"), os.path.join(d, "pub.pem")
+            subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", priv], check=True, capture_output=True)
+            subprocess.run(["openssl", "rsa", "-in", priv, "-pubout", "-out", pub], check=True, capture_output=True)
+            msg = walmart_api.canonical("cid-123", "1700000000000", "1")
+            self.assertEqual(msg, "cid-123\n1700000000000\n1\n")  # ID, INTIMESTAMP, KEY_VERSION order
+            sig = walmart_api.sign(open(priv).read(), msg)
+            sf = os.path.join(d, "sig"); open(sf, "wb").write(base64.b64decode(sig))
+            ok = subprocess.run(["openssl", "dgst", "-sha256", "-verify", pub, "-signature", sf], input=msg.encode(), capture_output=True)
+            self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+
+
+class TestHourlySams(unittest.TestCase):
+    def test_sams_checked_at_most_hourly(self):
+        c = cfg()
+        c["retailers"]["samsclub"]["min_interval_minutes"] = 60
+        hits = []
+        def fetcher(url):
+            hits.append(url)
+            return Fetched(url, 200, oos("walmart") if "walmart" in url else SAMS_CHALLENGE, attempts=1)
+        state, now, n = {}, T0, FakeNotifier()
+        for _ in range(12):  # two hours of 10-minute runs
+            state, _, _ = core.run_cycle(c, state, fetcher, n, now)
+            now += timedelta(minutes=10)
+        self.assertEqual(sum("samsclub" in u for u in hits), 2)
+        self.assertEqual(sum("walmart" in u for u in hits), 12)
+        self.assertEqual(state["retailers"]["samsclub"]["consecutive_failures"], 2)
 
 
 class TestTelegram(unittest.TestCase):

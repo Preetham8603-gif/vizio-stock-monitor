@@ -50,6 +50,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WALMART_CONSUMER_ID: ${{ secrets.WALMART_CONSUMER_ID }}
+          WALMART_KEY_VERSION: ${{ secrets.WALMART_KEY_VERSION }}
+          WALMART_PRIVATE_KEY: ${{ secrets.WALMART_PRIVATE_KEY }}
         run: |
           set -o pipefail
           case "$MODE" in

@@ -56,7 +56,8 @@ def blank_retailer_state() -> dict:
             "alerted_methods": [], "channels": [], "location_postal": None}
 
 
-def run_cycle(cfg: dict, state: dict, fetcher, notifier, now: datetime | None = None) -> tuple[dict, list[str], int]:
+def run_cycle(cfg: dict, state: dict, fetcher, notifier, now: datetime | None = None,
+              checkers: dict | None = None) -> tuple[dict, list[str], int]:
     """Returns (new_state, log_lines, exit_code). exit_code=1 only when an
     alert that should have been delivered could not be delivered."""
     now = now or datetime.now(timezone.utc)
@@ -94,16 +95,33 @@ def run_cycle(cfg: dict, state: dict, fetcher, notifier, now: datetime | None = 
     run_entry = {"t": iso(now)}
     for key, rcfg in cfg["retailers"].items():
         prev = state["retailers"].get(key) or blank_retailer_state()
-        f = fetcher(rcfg["url"])
-        if f.body or f.status:
-            r = parse.evaluate(key, f.body, cfg, f.status)
+        min_gap = rcfg.get("min_interval_minutes") or 0
+        last_checked = parse_iso(prev.get("last_checked"))
+        if min_gap and last_checked and (now - last_checked) < timedelta(minutes=min_gap - 2):
+            out.append(f"[{rcfg['name']}] skipped (checked {((now - last_checked).total_seconds() / 60):.0f} min ago; "
+                       f"interval {min_gap} min) – last state {prev.get('state')}")
+            run_entry[key] = "SKIPPED"
+            continue
+
+        via = "page"
+        if checkers and key in checkers:
+            via = "api"
+            try:
+                r = checkers[key](cfg)
+            except Exception as e:  # never let one retailer kill the cycle
+                r = parse.Result(rcfg["name"], parse.ERROR, f"{type(e).__name__}: {e}")
+            f = None
         else:
-            r = parse.Result(rcfg["name"], parse.ERROR, f"fetch failed: {f.error}")
-        if r.state in parse.HEALTHY_STATES and f.stale_seconds is not None and f.stale_seconds > 900:
-            r = parse.Result(rcfg["name"], parse.UNKNOWN, f"response is stale ({f.stale_seconds:.0f}s old)")
+            f = fetcher(rcfg["url"])
+            if f.body or f.status:
+                r = parse.evaluate(key, f.body, cfg, f.status)
+            else:
+                r = parse.Result(rcfg["name"], parse.ERROR, f"fetch failed: {f.error}")
+            if r.state in parse.HEALTHY_STATES and f.stale_seconds is not None and f.stale_seconds > 900:
+                r = parse.Result(rcfg["name"], parse.UNKNOWN, f"response is stale ({f.stale_seconds:.0f}s old)")
 
         out.append(f"[{rcfg['name']}] {r.state} price={money(r.price)} loc={r.location_postal} stores={r.location_store_ids} "
-                   f"http={f.status} attempts={f.attempts} :: {r.reason}")
+                   f"via={via} http={r.http_status if f is None else f.status} :: {r.reason}")
         for c in r.channels:
             out.append(f"    {c.method:<8} {c.raw_status:<14} verified_location={c.location_verified} '{c.location_text}' {c.note}")
 
@@ -171,8 +189,9 @@ def daily_summary(cfg: dict, state: dict, now: datetime) -> str:
              f"Checks in last 24h: {len(runs)} (expected ~144 at 10-min spacing)"]
     for key, rcfg in cfg["retailers"].items():
         rs = state.get("retailers", {}).get(key) or {}
-        ok = sum(1 for r in runs if r.get(key) in parse.HEALTHY_STATES)
-        lines.append(f"• {rcfg['name']}: {rs.get('state')} at {money(rs.get('price'))} – {ok}/{len(runs)} checks verified"
+        attempted = [r for r in runs if r.get(key) not in (None, "SKIPPED")]
+        ok = sum(1 for r in attempted if r.get(key) in parse.HEALTHY_STATES)
+        lines.append(f"• {rcfg['name']}: {rs.get('state')} at {money(rs.get('price'))} – {ok}/{len(attempted)} checks verified"
                      f"; last verified {az(parse_iso(rs['last_healthy'])) if rs.get('last_healthy') else 'never'}")
     gaps = state.get("stats", {}).get("gaps", [])
     if gaps:

@@ -2,9 +2,23 @@
   "product_label": "VIZIO 50\" Quantum 4K QLED Smart TV (2026 Limited Edition)",
   "expected_model": "VQD50X-10",
   "expected_upc": "194346693900",
-  "max_price": 128.00,
+  "max_price": 128.0,
   "target_zip": "85281",
-  "accepted_shipping_zips": ["85281", "85282", "85283", "85284", "85287", "85288", "85201", "85202", "85210", "85225", "85226", "85248", "85286"],
+  "accepted_shipping_zips": [
+    "85281",
+    "85282",
+    "85283",
+    "85284",
+    "85287",
+    "85288",
+    "85201",
+    "85202",
+    "85210",
+    "85225",
+    "85226",
+    "85248",
+    "85286"
+  ],
   "accepted_shipping_zip_note": "Tempe / nearby East Valley ZIPs. Walmart and Sam's ship from the same regional fulfillment centers to all of these, so a shipping result rendered for one of them is treated as valid for 85281.",
   "retailers": {
     "walmart": {
@@ -23,7 +37,8 @@
         "2112": "Scottsdale N Pima Rd Supercenter (6.9 mi)",
         "1512": "Chandler W Warner Rd Supercenter (7.7 mi)",
         "2671": "Chandler S Arizona Ave Supercenter"
-      }
+      },
+      "method": "affiliate_api (falls back to page if WALMART_* secrets missing)"
     },
     "samsclub": {
       "name": "Sam's Club",
@@ -32,12 +47,13 @@
       "item_id": "20393771188",
       "require_seller_display_name": null,
       "membership_note": "Sam's Club membership required to purchase",
-      "nearby_store_ids": {}
+      "nearby_store_ids": {},
+      "min_interval_minutes": 60
     }
   },
   "failure_alert_after_consecutive": 3,
   "schedule_gap_warning_minutes": 45,
   "daily_summary_hour_local": 8,
   "notify_price_changes": true,
-  "history_length": 60
+  "history_length": 170
 }

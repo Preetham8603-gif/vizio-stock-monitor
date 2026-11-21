@@ -16,7 +16,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import core
+from . import core, walmart_api
 from .fetch import fetch
 from .notify import NotifyError, Telegram
 
@@ -98,7 +98,10 @@ def main(argv=None) -> int:
     if not args.dry_run and not getattr(notifier, "configured", True):
         print("ERROR: Telegram secrets missing; refusing to run a live cycle that could not alert.")
         return 1
-    state, lines, code = core.run_cycle(cfg, state, fetch, notifier, now)
+    checkers = {"walmart": walmart_api.check} if walmart_api.configured() else None
+    if checkers is None:
+        print("NOTE: Walmart API secrets not set; falling back to page check (blocked from cloud IPs).")
+    state, lines, code = core.run_cycle(cfg, state, fetch, notifier, now, checkers=checkers)
     for line in lines:
         print(line)
     for line in core.maybe_daily_summary(cfg, state, notifier, now):
