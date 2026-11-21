@@ -1,0 +1,84 @@
+name: vizio-monitor
+
+on:
+  schedule:
+    # Every 10 minutes, offset from :00 to dodge GitHub's top-of-hour load.
+    # GitHub does not guarantee exact timing; delays of 5-30+ min happen.
+    - cron: "3-59/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to run"
+        type: choice
+        default: check
+        options: [check, test-notify, summary, dry-run]
+
+permissions:
+  contents: write   # only to push state to the `state` branch / monthly keepalive
+
+concurrency:
+  group: vizio-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    # Paused via repo variable MONITOR_PAUSED=true (manual runs still allowed).
+    if: ${{ vars.MONITOR_PAUSED != 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      MODE: ${{ github.event_name == 'schedule' && 'check' || inputs.mode }}
+      MAX_PRICE: ${{ vars.MAX_PRICE }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Load saved state
+        run: |
+          mkdir -p state
+          if git fetch --depth=1 origin state 2>/dev/null; then
+            git rev-parse FETCH_HEAD > .state_parent
+            git show FETCH_HEAD:state.json > state/state.json && echo "state loaded" || echo "state branch has no state.json"
+          else
+            echo "no state branch yet (first run)"
+          fi
+
+      - name: Run monitor (${{ env.MODE }})
+        id: run
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -o pipefail
+          case "$MODE" in
+            dry-run) python3 -m monitor check --dry-run | tee run.log ;;
+            *)       python3 -m monitor "$MODE" | tee run.log ;;
+          esac
+
+      - name: Job summary
+        if: always()
+        run: |
+          { echo "### VIZIO monitor ($MODE) – $(TZ=America/Phoenix date '+%a %b %d %I:%M %p') Arizona"; echo '```'; cat run.log 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save state to `state` branch
+        if: always() && (env.MODE == 'check' || env.MODE == 'summary') && hashFiles('state/state.json') != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          blob=$(git hash-object -w state/state.json)
+          tree=$(printf '100644 blob %s\tstate.json\n' "$blob" | git mktree)
+          parent=$(cat .state_parent 2>/dev/null || true)
+          commit=$(git commit-tree "$tree" ${parent:+-p "$parent"} -m "state $(date -u +%FT%TZ)")
+          for i in 1 2 3; do git push -q origin "$commit:refs/heads/state" && exit 0; sleep $((i*5)); done
+          echo "::error::could not persist state"; exit 1
+
+      - name: Monthly keepalive (prevents 60-day schedule auto-disable)
+        if: success() && env.MODE == 'check'
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt $((30*24*3600)) ]; then
+            git commit --allow-empty -q -m "keepalive: scheduled monitor still active"
+            git push -q origin HEAD:${{ github.event.repository.default_branch }}
+          fi
