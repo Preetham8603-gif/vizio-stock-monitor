@@ -1,0 +1,43 @@
+{
+  "product_label": "VIZIO 50\" Quantum 4K QLED Smart TV (2026 Limited Edition)",
+  "expected_model": "VQD50X-10",
+  "expected_upc": "194346693900",
+  "max_price": 128.00,
+  "target_zip": "85281",
+  "accepted_shipping_zips": ["85281", "85282", "85283", "85284", "85287", "85288", "85201", "85202", "85210", "85225", "85226", "85248", "85286"],
+  "accepted_shipping_zip_note": "Tempe / nearby East Valley ZIPs. Walmart and Sam's ship from the same regional fulfillment centers to all of these, so a shipping result rendered for one of them is treated as valid for 85281.",
+  "retailers": {
+    "walmart": {
+      "name": "Walmart",
+      "url": "https://www.walmart.com/ip/20255253279",
+      "buy_url": "https://www.walmart.com/ip/20255253279",
+      "item_id": "20255253279",
+      "require_seller_display_name": "Walmart.com",
+      "nearby_store_ids": {
+        "5768": "Tempe E Southern Ave Supercenter (2.1 mi)",
+        "2482": "Mesa N Dobson Rd Supercenter (4.7 mi)",
+        "1746": "Tempe W Elliot Rd Supercenter (4.8 mi)",
+        "2515": "Phoenix E Thomas Rd Supercenter (5.2 mi)",
+        "4293": "Phoenix E Baseline Rd Neighborhood Market (5.7 mi)",
+        "3799": "Mesa W Baseline Rd Supercenter (6.9 mi)",
+        "2112": "Scottsdale N Pima Rd Supercenter (6.9 mi)",
+        "1512": "Chandler W Warner Rd Supercenter (7.7 mi)",
+        "2671": "Chandler S Arizona Ave Supercenter"
+      }
+    },
+    "samsclub": {
+      "name": "Sam's Club",
+      "url": "https://www.samsclub.com/ip/vizio-50-class-quantum-series-4k-qled-smart-tv/20393771188",
+      "buy_url": "https://www.samsclub.com/ip/vizio-50-class-quantum-series-4k-qled-smart-tv/20393771188",
+      "item_id": "20393771188",
+      "require_seller_display_name": null,
+      "membership_note": "Sam's Club membership required to purchase",
+      "nearby_store_ids": {}
+    }
+  },
+  "failure_alert_after_consecutive": 3,
+  "schedule_gap_warning_minutes": 45,
+  "daily_summary_hour_local": 8,
+  "notify_price_changes": true,
+  "history_length": 60
+}
